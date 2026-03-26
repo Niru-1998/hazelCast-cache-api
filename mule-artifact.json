@@ -1,0 +1,15 @@
+{
+    "classLoaderModelLoaderDescriptor": {
+        "attributes": {
+            "exportedPackages": ["com.example.mule.cache"],
+            "exportedResources": [
+                "beans.xml",
+                "ehcache.xml"
+            ]
+        },
+        "id": "mule"
+    },
+    "minMuleVersion": "4.4.0",
+    "javaSpecificationVersions": ["17"],
+    "secureProperties": []
+}

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Configuration status="WARN">
+    <Appenders>
+        <Console name="Console" target="SYSTEM_OUT">
+            <PatternLayout pattern="%-5p %d [%t] [event: %X{correlationId}] %c - %m%n" />
+        </Console>
+    </Appenders>
+    <Loggers>
+        <!-- Application logger -->
+        <AsyncLogger name="com.example.mule.cache" level="DEBUG" />
+
+        <!-- Hazelcast logger -->
+        <AsyncLogger name="com.hazelcast" level="INFO" />
+
+        <!-- Mule loggers -->
+        <AsyncLogger name="org.mule.runtime.core.internal.processor.LoggerMessageProcessor" level="INFO" />
+
+        <AsyncRoot level="INFO">
+            <AppenderRef ref="Console" />
+        </AsyncRoot>
+    </Loggers>
+</Configuration>

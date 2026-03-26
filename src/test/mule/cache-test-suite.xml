@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:munit="http://www.mulesoft.org/schema/mule/munit"
+      xmlns:munit-tools="http://www.mulesoft.org/schema/mule/munit-tools"
+      xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+          http://www.mulesoft.org/schema/mule/core
+            http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+          http://www.mulesoft.org/schema/mule/munit
+            http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd
+          http://www.mulesoft.org/schema/mule/munit-tools
+            http://www.mulesoft.org/schema/mule/munit-tools/current/mule-munit-tools.xsd
+          http://www.mulesoft.org/schema/mule/http
+            http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd">
+
+    <munit:config name="cache-test-suite" />
+
+    <munit:test name="cache-put-returns-confirmation"
+                description="Verify PUT stores a value and returns confirmation">
+        <munit:enable-flow-sources>
+            <munit:enable-flow-source value="cache-put-flow" />
+        </munit:enable-flow-sources>
+        <munit:execution>
+            <http:request method="POST"
+                          url="http://localhost:8081/cache"
+                          config-ref="HTTP_Request_Config">
+                <http:query-params>
+                    #[{ "key": "munit-test-key" }]
+                </http:query-params>
+                <http:body>
+                    #["munit-test-value"]
+                </http:body>
+            </http:request>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that
+                expression="#[payload]"
+                is="#[MunitTools::containsString('Cached key')]" />
+        </munit:validation>
+    </munit:test>
+
+    <munit:test name="cache-get-returns-stored-value"
+                description="Verify GET retrieves a previously stored value">
+        <munit:enable-flow-sources>
+            <munit:enable-flow-source value="cache-put-flow" />
+            <munit:enable-flow-source value="cache-get-flow" />
+        </munit:enable-flow-sources>
+        <munit:execution>
+            <!-- First PUT -->
+            <http:request method="POST"
+                          url="http://localhost:8081/cache"
+                          config-ref="HTTP_Request_Config">
+                <http:query-params>
+                    #[{ "key": "munit-get-key" }]
+                </http:query-params>
+                <http:body>
+                    #["expected-value"]
+                </http:body>
+            </http:request>
+            <!-- Then GET -->
+            <http:request method="GET"
+                          url="http://localhost:8081/cache"
+                          config-ref="HTTP_Request_Config">
+                <http:query-params>
+                    #[{ "key": "munit-get-key" }]
+                </http:query-params>
+            </http:request>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that
+                expression="#[payload]"
+                is="#[MunitTools::equalTo('expected-value')]" />
+        </munit:validation>
+    </munit:test>
+
+</mule>

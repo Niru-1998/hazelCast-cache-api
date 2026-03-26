@@ -1,0 +1,274 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:java="http://www.mulesoft.org/schema/mule/java"
+	xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core" xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd 
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/java http://www.mulesoft.org/schema/mule/java/current/mule-java.xsd">
+
+    <!-- ====================================================== -->
+    <!-- FLOW 1 – PUT (String OR JSON) – PERSISTED TO DISK      -->
+    <!--   POST /cache?key=myKey                                -->
+    <!--   Body: "plain text" OR {"name":"John","age":30}       -->
+    <!-- ====================================================== -->
+    <http:listener-config name="HTTP_Listener_config" doc:name="HTTP Listener config" doc:id="99ce2b59-975e-431a-9f0c-4aa41d154449" >
+		<http:listener-connection host="localhost" port="8081" />
+	</http:listener-config>
+	<flow name="persistant-cache-put-flow">
+        <http:listener path="/cache"
+                       allowedMethods="POST"
+                       doc:name="POST /cache" config-ref="HTTP_Listener_config"/>
+
+        <set-variable variableName="cacheKey"
+                      value="#[attributes.queryParams.key]"
+                      doc:name="Extract key" />
+
+        <!-- Step 2: CONVERT STREAM TO STRING -->
+        <!-- This is the critical fix. Mule wraps HTTP body in a   -->
+        <!-- ManagedCursorStreamProvider. This transform forces     -->
+        <!-- Mule to read the entire stream and produce a plain    -->
+        <!-- java.lang.String. Without this step, the Java method  -->
+        <!-- receives "ManagedCursorStreamProvider@xxxx".           -->
+
+        <!-- Step 3: Save the now-real-String into a variable      -->
+        <!-- This breaks any remaining lazy stream reference.      -->
+        <set-variable variableName="cacheValue"
+                      value="#[payload as String]"
+                      doc:name="Save String value" />
+
+        <!-- Step 4: Call Java with the String variable             -->
+        <!-- NEVER pass 'payload' directly to java:invoke-static   -->
+        <!-- when the payload came from an HTTP body.               -->
+        <java:invoke-static
+            class="com.example.mule.cache.HazelcastPersistentCacheHelper"
+            method="put(java.lang.String,java.lang.Object)"
+            doc:name="Put into Hazelcast">
+            <java:args><![CDATA[#[%dw 2.0
+output application/java
+---
+{
+	key: vars.cacheKey,
+	value: vars.cacheValue
+}]]]></java:args>
+        </java:invoke-static>
+
+        <ee:transform doc:name="Response">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    status     : "cached",
+    persistent : true,
+    key        : vars.cacheKey
+}]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+    </flow>
+
+    <!-- ====================================================== -->
+    <!-- FLOW 1b – PUT with TTL (auto-expire)                   -->
+    <!--   POST /cache/ttl?key=myKey&ttl=60                     -->
+    <!-- ====================================================== -->
+    <flow name="cache-put-ttl-flow">
+        <http:listener path="/cache/ttl"
+                       allowedMethods="POST"
+                       doc:name="POST /cache/ttl" config-ref="HTTP_Listener_config"/>
+
+        <set-variable variableName="cacheKey"
+                      value="#[attributes.queryParams.key]"
+                      doc:name="Extract key" />
+        <set-variable variableName="ttlSeconds"
+                      value="#[attributes.queryParams.ttl default '300']"
+                      doc:name="Extract TTL (default 300s)" />
+
+        <java:invoke-static
+            class="com.example.mule.cache.HazelcastPersistentCacheHelper"
+            doc:name="Put with TTL (persisted)" method="putWithTtl(java.lang.String,java.lang.Object,int)">
+            <java:args><![CDATA[#[%dw 2.0
+output application/java
+---
+{
+	key: vars.cacheKey,
+	value: payload,
+	ttlSeconds: vars.ttlSeconds as Number
+}]]]></java:args>
+        </java:invoke-static>
+
+        <ee:transform doc:name="Response">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    status     : "cached",
+    persistent : true,
+    key        : vars.cacheKey,
+    ttlSeconds : vars.ttlSeconds
+}]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+    </flow>
+
+    <!-- ====================================================== -->
+    <!-- FLOW 2 – GET                                           -->
+    <!--   GET /cache?key=myKey                                 -->
+    <!-- ====================================================== -->
+    <flow name="persistant-cache-get-flow">
+        <http:listener path="/cache"
+                       allowedMethods="GET"
+                       doc:name="GET /cache" config-ref="HTTP_Listener_config"/>
+
+        <set-variable variableName="cacheKey"
+                      value="#[attributes.queryParams.key]"
+                      doc:name="Extract key" />
+
+        <java:invoke-static
+            class="com.example.mule.cache.HazelcastPersistentCacheHelper"
+            method="get(java.lang.String)"
+            doc:name="Get from Hazelcast">
+            <java:args><![CDATA[#[%dw 2.0
+output application/java
+---
+{
+	key: vars.cacheKey
+}]]]></java:args>
+        </java:invoke-static>
+
+        <choice doc:name="Cache Hit?">
+            <when expression="#[payload != null]">
+                <logger level="INFO"
+                        message='#["Cache HIT (persistent): " ++ vars.cacheKey]' />
+                <ee:transform doc:name="Return cached value">
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    found      : true,
+    persistent : true,
+    key        : vars.cacheKey
+}]]></ee:set-payload>
+                    </ee:message>
+                </ee:transform>
+            </when>
+            <otherwise>
+                <logger level="INFO"
+                        message='#["Cache MISS: " ++ vars.cacheKey]' />
+                <ee:transform doc:name="Not Found">
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    found      : false,
+    persistent : true,
+    key        : vars.cacheKey
+}]]></ee:set-payload>
+                    </ee:message>
+                </ee:transform>
+            </otherwise>
+        </choice>
+    </flow>
+
+    <!-- ====================================================== -->
+    <!-- FLOW 2b – GET with metadata                            -->
+    <!--   GET /cache/meta?key=myKey                            -->
+    <!-- ====================================================== -->
+    <flow name="cache-get-meta-flow">
+        <http:listener path="/cache/meta"
+                       allowedMethods="GET"
+                       doc:name="GET /cache/meta" config-ref="HTTP_Listener_config"/>
+
+        <set-variable variableName="cacheKey"
+                      value="#[attributes.queryParams.key]"
+                      doc:name="Extract key" />
+
+        <java:invoke-static
+            class="com.example.mule.cache.HazelcastPersistentCacheHelper"
+            method="getWithMeta(java.lang.String)"
+            doc:name="Get with metadata">
+            <java:args><![CDATA[#[%dw 2.0
+output application/java
+---
+{
+	key: vars.cacheKey
+}]]]></java:args>
+        </java:invoke-static>
+
+        <ee:transform doc:name="JSON response">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+payload]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+    </flow>
+
+    <!-- ====================================================== -->
+    <!-- FLOW 3 – DELETE / Evict (removes from memory + disk)   -->
+    <!--   DELETE /cache?key=myKey                              -->
+    <!-- ====================================================== -->
+    <flow name="persistant-cache-evict-flow">
+        <http:listener path="/cache"
+                       allowedMethods="DELETE"
+                       doc:name="DELETE /cache" config-ref="HTTP_Listener_config"/>
+
+        <set-variable variableName="cacheKey"
+                      value="#[attributes.queryParams.key]"
+                      doc:name="Extract key" />
+
+        <java:invoke-static
+            class="com.example.mule.cache.HazelcastPersistentCacheHelper"
+            method="evict(java.lang.String)"
+            doc:name="Evict from Hazelcast (memory + disk)">
+            <java:args><![CDATA[#[%dw 2.0
+output application/java
+---
+{
+	key: vars.cacheKey
+}]]]></java:args>
+        </java:invoke-static>
+
+        <ee:transform doc:name="Response">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    status     : "evicted",
+    persistent : true,
+    key        : vars.cacheKey
+}]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+    </flow>
+
+    <!-- ====================================================== -->
+    <!-- FLOW 4 – PERSISTENCE STATUS (health check)             -->
+    <!--   GET /cache/status                                    -->
+    <!-- ====================================================== -->
+    <flow name="cache-status-flow">
+        <http:listener path="/cache/status"
+                       allowedMethods="GET"
+                       doc:name="GET /cache/status" config-ref="HTTP_Listener_config"/>
+
+        <java:invoke-static
+            class="com.example.mule.cache.HazelcastPersistentCacheHelper"
+            method="persistenceStatus()"
+            doc:name="Get persistence status">
+        </java:invoke-static>
+
+        <ee:transform doc:name="JSON response">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+payload]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+    </flow></mule>

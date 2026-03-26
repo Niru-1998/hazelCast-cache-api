@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns:cache="http://www.springframework.org/schema/cache"
+	xsi:schemaLocation="
+           http://www.springframework.org/schema/beans
+           http://www.springframework.org/schema/beans/spring-beans.xsd
+           http://www.springframework.org/schema/cache
+           http://www.springframework.org/schema/cache/spring-cache.xsd">
+
+	<!-- ====================================================== -->
+	<!-- 1. Hazelcast Configuration Bean -->
+	<!-- Defines the embedded Hazelcast instance settings. -->
+	<!-- ====================================================== -->
+	<bean id="hazelcastConfig" class="com.hazelcast.config.Config">
+		<property name="instanceName" value="mule-hazelcast-instance" />
+		<property name="networkConfig">
+			<bean class="com.hazelcast.config.NetworkConfig">
+				<property name="port" value="5701" />
+				<property name="portAutoIncrement" value="true" />
+				<property name="join">
+					<bean class="com.hazelcast.config.JoinConfig">
+						<!-- Multicast discovery for cluster peers -->
+						<property name="multicastConfig">
+							<bean class="com.hazelcast.config.MulticastConfig">
+								<property name="enabled" value="true" />
+								<property name="multicastGroup" value="224.2.2.3" />
+								<property name="multicastPort" value="54327" />
+							</bean>
+						</property>
+						<!-- TCP/IP discovery (alternative for cloud) -->
+						<property name="tcpIpConfig">
+							<bean class="com.hazelcast.config.TcpIpConfig">
+								<property name="enabled" value="false" />
+								<!-- <property name="members"> <list> <value>10.0.0.1</value> <value>10.0.0.2</value> 
+									</list> </property> -->
+							</bean>
+						</property>
+					</bean>
+				</property>
+			</bean>
+		</property>
+	</bean>
+
+	<!-- ====================================================== -->
+	<!-- 2. Hazelcast Instance (Embedded Server) -->
+	<!-- This starts the embedded Hazelcast node at app -->
+	<!-- deployment time. -->
+	<!-- ====================================================== -->
+	<bean id="hazelcastInstance" class="com.hazelcast.core.Hazelcast"
+		factory-method="newHazelcastInstance" destroy-method="shutdown">
+		<constructor-arg ref="hazelcastConfig" />
+	</bean>
+
+	<!-- ====================================================== -->
+	<!-- 3. Spring CacheManager backed by Hazelcast -->
+	<!-- Allows @Cacheable / programmatic Spring Cache use. -->
+	<!-- ====================================================== -->
+	<bean id="cacheManager"
+		class="com.hazelcast.spring.cache.HazelcastCacheManager">
+		<constructor-arg ref="hazelcastInstance" />
+	</bean>
+
+	<!-- Enable Spring's cache annotation processing (optional) -->
+	<cache:annotation-driven
+		cache-manager="cacheManager" />
+
+	<!-- ====================================================== -->
+	<!-- 4. Custom Cache Helper Bean -->
+	<!-- A lightweight Java helper that Mule flows invoke -->
+	<!-- via <java:invoke> to perform get / put / remove. -->
+	<!-- ====================================================== -->
+	<bean id="cacheHelper"
+		class="com.example.mule.cache.HazelcastCacheHelper">
+		<constructor-arg ref="hazelcastInstance" />
+	</bean>
+
+</beans>
